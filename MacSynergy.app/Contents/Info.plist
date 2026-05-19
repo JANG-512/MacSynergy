@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>MacSynergy</string>
+    <key>CFBundleDisplayName</key>
+    <string>MacSynergy</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.antigravity.MacSynergy</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>MacSynergy</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2025 antigravity. All rights reserved.</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <!-- Accessibility: required for global Shift+Space hotkey -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>MacSynergy uses Apple Events to automate Chrome for Ultimate Mode handoff.</string>
+</dict>
+</plist>

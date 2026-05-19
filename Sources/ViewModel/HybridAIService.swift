@@ -5,19 +5,21 @@ struct ChatMessage: Codable, Identifiable {
     let role: String        // "user", "assistant", or "model"
     let content: String     // full content sent to AI (may include system directives)
     let displayContent: String? // user-visible label (stripped of system prompts)
+    let engine: AIEngine    // which engine generated this message (for label display)
 
-    init(role: String, content: String, displayContent: String? = nil) {
+    init(role: String, content: String, displayContent: String? = nil, engine: AIEngine = .local) {
         self.id = UUID()
         self.role = role
         self.content = content
         self.displayContent = displayContent
+        self.engine = engine
     }
 
     /// Clean text to show in conversation history UI
     var visibleContent: String { displayContent ?? content }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, content, displayContent
+        case id, role, content, displayContent, engine
     }
 
     init(from decoder: Decoder) throws {
@@ -26,6 +28,7 @@ struct ChatMessage: Codable, Identifiable {
         self.role = try container.decode(String.self, forKey: .role)
         self.content = try container.decode(String.self, forKey: .content)
         self.displayContent = try? container.decode(String.self, forKey: .displayContent)
+        self.engine = (try? container.decode(AIEngine.self, forKey: .engine)) ?? .local
     }
 }
 

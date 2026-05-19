@@ -3,7 +3,7 @@ import Combine
 import NaturalLanguage
 import AppKit
 
-enum AIEngine: String, CaseIterable, Identifiable {
+enum AIEngine: String, CaseIterable, Identifiable, Codable {
     case local = "Local (Ollama)"
     case cloud = "Cloud (Gemini)"
     var id: String { self.rawValue }
@@ -313,7 +313,7 @@ class MacSynergyViewModel: ObservableObject {
                 self.isLoading = false
                 self.isGenerating = false
                 self.conversationHistory.append(
-                    ChatMessage(role: "assistant", content: self.aiResponse)
+                    ChatMessage(role: "assistant", content: self.aiResponse, engine: .local)
                 )
             } catch {
                 self.isLoading = false
@@ -350,7 +350,7 @@ class MacSynergyViewModel: ObservableObject {
                 self.isLoading = false
                 self.isGenerating = false
                 self.conversationHistory.append(
-                    ChatMessage(role: "model", content: self.aiResponse)
+                    ChatMessage(role: "model", content: self.aiResponse, engine: .cloud)
                 )
             } catch {
                 self.isLoading = false
@@ -372,6 +372,9 @@ class MacSynergyViewModel: ObservableObject {
         self.errorMessage = nil
         self.isLoading = true
         self.isGenerating = false
+
+        // Route BEFORE building the prompt so Auto mode uses the actual content to decide
+        routeRequest(prompt: action.promptPrefix + selectedText, context: selectedText)
 
         let preview = String(selectedText.prefix(50))
         let finalPrompt: String

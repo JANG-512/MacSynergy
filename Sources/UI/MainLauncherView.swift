@@ -1242,7 +1242,7 @@ struct MessageBubbleView: View {
                         .cornerRadius(4, corners: .topRight)
                 } else {
                     // AI bubble — glass left-aligned with markdown
-                    AIMessageBubble(text: message.content, isStreaming: false, engine: .local)
+                    AIMessageBubble(text: message.content, isStreaming: false, engine: message.engine)
                 }
             }
 
