@@ -1036,7 +1036,27 @@ struct ResponseControlBar: View {
                 TypingIndicatorView()
                     .padding(.trailing, 4)
             }
-            
+
+            // ── Stop generation button (shown while generating) ──
+            if viewModel.isGenerating || viewModel.isLoading {
+                Button(action: { viewModel.cancelGeneration() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("Stop")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.red.opacity(0.85))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                .help("Stop generation")
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+
             // Reset/Regenerate Button
             Button(action: {
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {

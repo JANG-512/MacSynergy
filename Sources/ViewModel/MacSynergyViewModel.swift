@@ -51,12 +51,18 @@ class MacSynergyViewModel: ObservableObject {
                 let src = first.visibleContent.trimmingCharacters(in: .whitespacesAndNewlines)
                 chatSessions[index].title = src.count > 25 ? String(src.prefix(22)) + "..." : src
             }
-            // chatSessions.didSet handles the actual save — no extra call needed
         }
     }
 
     @Published var selectedEngineMode: AIEngineMode = .auto {
-        didSet { updateEngineFromMode() }
+        didSet {
+            updateEngineFromMode()
+            UserDefaults.standard.set(selectedEngineMode.rawValue, forKey: "ENGINE_MODE")
+            // Unload Ollama when user switches away from local
+            if selectedEngineMode == .cloud {
+                Task { await ollamaManager.unloadNow() }
+            }
+        }
     }
 
     @Published var showSettings: Bool = false
@@ -67,6 +73,7 @@ class MacSynergyViewModel: ObservableObject {
     @Published var formattedMarkdown: AttributedString? = nil
     @Published var isLoading: Bool = false
     @Published var isGenerating: Bool = false
+    @Published var isCancelled: Bool = false
     @Published var errorMessage: String? = nil
     @Published var selectedAction: String? = nil
     @Published var showResponse: Bool = false
@@ -74,15 +81,35 @@ class MacSynergyViewModel: ObservableObject {
     @Published var ollamaModel: String = "exaone3.5:7.8b"
     @Published var geminiModel: String = "gemini-3.1-flash-lite"
 
+    // Battery & lifecycle
+    let ollamaManager = OllamaLifecycleManager()
+    // Stats for dashboard
+    let stats = StatsTracker()
+    // Web dashboard server
+    private let dashboardServer = DashboardServer()
+
     private var cancellables = Set<AnyCancellable>()
     private let recognizer = NLLanguageRecognizer()
     private let hybridService = HybridAIService()
+    private var generationTask: Task<Void, Never>?
 
     init() {
         self.apiKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
             ?? UserDefaults.standard.string(forKey: "GEMINI_API_KEY") ?? ""
         self.ollamaModel = UserDefaults.standard.string(forKey: "OLLAMA_MODEL_NAME") ?? "exaone3.5:7.8b"
         self.geminiModel = UserDefaults.standard.string(forKey: "GEMINI_MODEL_NAME") ?? "gemini-3.1-flash-lite"
+
+        // Restore engine mode preference
+        if let saved = UserDefaults.standard.string(forKey: "ENGINE_MODE"),
+           let mode = AIEngineMode(rawValue: saved) {
+            self._selectedEngineMode = Published(wrappedValue: mode)
+            // Sync selectedEngine without triggering didSet recursion
+            switch mode {
+            case .local: self._selectedEngine = Published(wrappedValue: .local)
+            case .cloud: self._selectedEngine = Published(wrappedValue: .cloud)
+            case .auto:  self._selectedEngine = Published(wrappedValue: .local)
+            }
+        }
 
         self.chatSessions = EncryptedHistoryManager.loadSessions()
         if let first = self.chatSessions.first {
@@ -93,6 +120,9 @@ class MacSynergyViewModel: ObservableObject {
             self.chatSessions = [s]
             self.currentSessionId = s.id
         }
+
+        stats.loadFromDisk()
+        setupDashboardServer()
 
         NotificationCenter.default.publisher(for: .didReceiveSelectedText)
             .receive(on: RunLoop.main)
@@ -153,6 +183,42 @@ class MacSynergyViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - Dashboard server setup
+
+    private func setupDashboardServer() {
+        dashboardServer.statsProvider = { [weak self] in
+            self?.stats.statsJSON ?? [:]
+        }
+        dashboardServer.statusProvider = { [weak self] in
+            guard let self else { return [:] }
+            return [
+                "engineMode": self.selectedEngineMode.rawValue,
+                "activeEngine": self.selectedEngine.rawValue,
+                "localModel": self.ollamaModel,
+                "cloudModel": self.geminiModel,
+                "ollamaState": self.ollamaManager.state.rawValue,
+                "apiKeySet": !self.apiKey.isEmpty,
+                "isGenerating": self.isGenerating
+            ]
+        }
+        dashboardServer.start()
+    }
+
+    // MARK: - Cancel generation
+
+    func cancelGeneration() {
+        isCancelled = true
+        generationTask?.cancel()
+        generationTask = nil
+        isLoading = false
+        isGenerating = false
+        if aiResponse.isEmpty {
+            errorMessage = "Generation cancelled."
+        }
+        // Notify Ollama manager that activity stopped
+        ollamaManager.notifyGenerationFinished()
     }
 
     // MARK: - Persistence
@@ -306,8 +372,16 @@ class MacSynergyViewModel: ObservableObject {
         case .auto:  useCloud = (selectedEngine == .cloud)
         }
 
+        isCancelled = false
+        let startTime = Date()
+
         if !useCloud {
+            // Ensure Ollama model is warm before streaming
+            await ollamaManager.ensureModelLoaded(self.ollamaModel)
+            guard !isCancelled else { return }
+
             self.isGenerating = true
+            var tokenCount = 0
             do {
                 let stream = hybridService.generateLocalStream(
                     history: self.conversationHistory,
@@ -315,28 +389,38 @@ class MacSynergyViewModel: ObservableObject {
                 )
                 var first = true
                 for try await token in stream {
+                    if isCancelled { break }
                     if first { self.isLoading = false; first = false }
                     self.aiResponse += token
+                    tokenCount += token.count / 4   // rough token estimate
                     updateMarkdown()
                 }
                 self.isLoading = false
                 self.isGenerating = false
-                self.conversationHistory.append(
-                    ChatMessage(role: "assistant", content: self.aiResponse, engine: .local)
-                )
+                if !isCancelled && !self.aiResponse.isEmpty {
+                    self.conversationHistory.append(
+                        ChatMessage(role: "assistant", content: self.aiResponse, engine: .local)
+                    )
+                    stats.record(engine: .local, action: selectedAction ?? "Chat",
+                                 duration: Date().timeIntervalSince(startTime), tokens: tokenCount)
+                }
             } catch {
                 self.isLoading = false
                 self.isGenerating = false
-                self.errorMessage = """
-                Local Ollama Connection Failure:
+                if !isCancelled {
+                    self.errorMessage = """
+                    Local Ollama Connection Failure:
 
-                1. Make sure Ollama is running on your Mac.
-                2. Pull the model if needed:
-                   $ ollama pull \(self.ollamaModel)
+                    1. Make sure Ollama is running on your Mac.
+                    2. Pull the model if needed:
+                       $ ollama pull \(self.ollamaModel)
 
-                Details: \(error.localizedDescription)
-                """
+                    Details: \(error.localizedDescription)
+                    """
+                }
             }
+            ollamaManager.notifyGenerationFinished()
+
         } else {
             guard !self.apiKey.isEmpty else {
                 self.isLoading = false
@@ -344,6 +428,7 @@ class MacSynergyViewModel: ObservableObject {
                 return
             }
             self.isGenerating = true
+            var tokenCount = 0
             do {
                 let stream = hybridService.generateCloudStream(
                     history: self.conversationHistory,
@@ -352,19 +437,27 @@ class MacSynergyViewModel: ObservableObject {
                 )
                 var first = true
                 for try await token in stream {
+                    if isCancelled { break }
                     if first { self.isLoading = false; first = false }
                     self.aiResponse += token
+                    tokenCount += token.count / 4
                     updateMarkdown()
                 }
                 self.isLoading = false
                 self.isGenerating = false
-                self.conversationHistory.append(
-                    ChatMessage(role: "model", content: self.aiResponse, engine: .cloud)
-                )
+                if !isCancelled && !self.aiResponse.isEmpty {
+                    self.conversationHistory.append(
+                        ChatMessage(role: "model", content: self.aiResponse, engine: .cloud)
+                    )
+                    stats.record(engine: .cloud, action: selectedAction ?? "Chat",
+                                 duration: Date().timeIntervalSince(startTime), tokens: tokenCount)
+                }
             } catch {
                 self.isLoading = false
                 self.isGenerating = false
-                self.errorMessage = "Cloud Gemini Error: \(error.localizedDescription)"
+                if !isCancelled {
+                    self.errorMessage = "Cloud Gemini Error: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -667,6 +760,7 @@ class MacSynergyViewModel: ObservableObject {
         self.currentSessionId = s.id
         self.conversationHistory = []
         self.resetResponse()
+        stats.incrementSessionCount()
     }
 
     func selectSession(id: UUID) {

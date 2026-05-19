@@ -58,6 +58,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "MacSynergy 열기  (Shift+Space)",
                                 action: #selector(showApp), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "📊 대시보드 열기  (localhost:3737)",
+                                action: #selector(openDashboard), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "접근성 설정 열기 (텍스트 선택 기능)",
                                 action: #selector(openAccessibilitySettings), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
@@ -67,6 +70,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showApp() { windowController.show() }
+
+    @objc private func openDashboard() {
+        if let url = URL(string: "http://localhost:\(DashboardServer.port)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
 
     @objc private func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
