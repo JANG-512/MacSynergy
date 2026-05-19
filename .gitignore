@@ -1,0 +1,14 @@
+.build/
+*.o
+*.d
+*.swp
+.DS_Store
+*.ips
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+/MacSynergy-*.dmg
