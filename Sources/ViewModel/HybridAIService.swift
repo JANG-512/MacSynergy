@@ -103,7 +103,7 @@ class HybridAIService {
         history: [ChatMessage],
         systemInstruction: String? = nil,
         apiKey: String,
-        model: String = "gemini-2.0-flash"
+        model: String = "gemini-3.1-flash-lite"
     ) -> AsyncThrowingStream<String, Error> {
         return AsyncThrowingStream { continuation in
             Task {
@@ -178,7 +178,7 @@ class HybridAIService {
         history: [ChatMessage],
         systemInstruction: String? = nil,
         apiKey: String,
-        model: String = "gemini-2.0-flash"
+        model: String = "gemini-3.1-flash-lite"
     ) async throws -> String {
         guard !apiKey.isEmpty else {
             throw NSError(domain: "HybridAIService", code: 401,
