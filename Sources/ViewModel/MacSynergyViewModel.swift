@@ -72,7 +72,7 @@ class MacSynergyViewModel: ObservableObject {
     @Published var showResponse: Bool = false
     @Published var apiKey: String = ""
     @Published var ollamaModel: String = "exaone3.5:7.8b"
-    @Published var geminiModel: String = "gemini-3.1-flash-lite"
+    @Published var geminiModel: String = "gemini-2.0-flash"
 
     private var cancellables = Set<AnyCancellable>()
     private let recognizer = NLLanguageRecognizer()
@@ -82,7 +82,7 @@ class MacSynergyViewModel: ObservableObject {
         self.apiKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
             ?? UserDefaults.standard.string(forKey: "GEMINI_API_KEY") ?? ""
         self.ollamaModel = UserDefaults.standard.string(forKey: "OLLAMA_MODEL_NAME") ?? "exaone3.5:7.8b"
-        self.geminiModel = UserDefaults.standard.string(forKey: "GEMINI_MODEL_NAME") ?? "gemini-3.1-flash-lite"
+        self.geminiModel = UserDefaults.standard.string(forKey: "GEMINI_MODEL_NAME") ?? "gemini-2.0-flash"
 
         self.chatSessions = EncryptedHistoryManager.loadSessions()
         if let first = self.chatSessions.first {
@@ -297,7 +297,16 @@ class MacSynergyViewModel: ObservableObject {
 
     @MainActor
     private func runAIGeneration() async {
-        if selectedEngine == .local {
+        // Determine engine directly from the authoritative mode — avoids any race condition
+        // where the `selectedEngine` mirror hasn't been updated yet.
+        let useCloud: Bool
+        switch selectedEngineMode {
+        case .cloud: useCloud = true
+        case .local: useCloud = false
+        case .auto:  useCloud = (selectedEngine == .cloud)
+        }
+
+        if !useCloud {
             self.isGenerating = true
             do {
                 let stream = hybridService.generateLocalStream(
