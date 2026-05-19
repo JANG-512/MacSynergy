@@ -100,7 +100,7 @@ MacSynergy/
 | Name | Role |
 |------|------|
 | **Jang Jinuk** | Product Vision & Design |
-| **Antigravity** | Engineering Lead |
+| **[google-gemini](https://github.com/google-gemini)** | Cloud AI Engine |
 | **Claude** (Anthropic) | AI Pair Programmer |
 
 ## License
