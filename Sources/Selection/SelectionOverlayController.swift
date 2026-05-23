@@ -256,14 +256,24 @@ class SelectionOverlayController {
     // MARK: - Panel factory
 
     private func makeBorderlessPanel(frame: NSRect, hasShadow: Bool) -> NSPanel {
-        let p = NSPanel(contentRect: frame,
-                        styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
+        let p = OverlayPanel(contentRect: frame,
+                             styleMask: [.borderless, .nonactivatingPanel],
+                             backing: .buffered, defer: false)
         p.isOpaque = false
         p.backgroundColor = .clear
         p.hasShadow = hasShadow
         p.level = .floating
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         return p
+    }
+}
+
+class OverlayPanel: NSPanel {
+    override var canBecomeKey: Bool {
+        return true
+    }
+    
+    override var canBecomeMain: Bool {
+        return true
     }
 }
