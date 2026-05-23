@@ -16,6 +16,30 @@ enum AIEngineMode: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
 }
 
+enum HandoffBrowser: String, CaseIterable, Identifiable, Codable {
+    case chrome = "Google Chrome"
+    case safari = "Safari"
+    case arc = "Arc"
+    var id: String { self.rawValue }
+}
+
+enum HandoffTarget: String, CaseIterable, Identifiable, Codable {
+    case chatgpt = "ChatGPT"
+    case claude = "Claude"
+    case gemini = "Gemini"
+    case deepseek = "DeepSeek"
+    var id: String { self.rawValue }
+    
+    var url: String {
+        switch self {
+        case .chatgpt: return "https://chatgpt.com/"
+        case .claude: return "https://claude.ai/"
+        case .gemini: return "https://gemini.google.com/"
+        case .deepseek: return "https://chat.deepseek.com/"
+        }
+    }
+}
+
 class MacSynergyViewModel: ObservableObject {
     @Published var inputText: String = ""
     @Published var detectedLanguage: String = "--"
@@ -28,6 +52,33 @@ class MacSynergyViewModel: ObservableObject {
     @Published var ultimateLocalResponse: String = ""
     @Published var ultimateCloudResponse: String = ""
     @Published var showUltimateToast: Bool = false
+
+    // Handoff configuration
+    @Published var selectedHandoffBrowser: HandoffBrowser = .chrome {
+        didSet {
+            UserDefaults.standard.set(selectedHandoffBrowser.rawValue, forKey: "HANDOFF_BROWSER")
+        }
+    }
+    @Published var selectedHandoffTarget: HandoffTarget = .chatgpt {
+        didSet {
+            UserDefaults.standard.set(selectedHandoffTarget.rawValue, forKey: "HANDOFF_TARGET")
+        }
+    }
+    
+    // Voice Dictation states
+    @Published var isRecording: Bool = false
+    @Published var soundLevel: Float = 0.0
+    let speechRecognizer = SpeechRecognizerManager()
+
+    // Model download states
+    @Published var downloadProgress: Double = 0.0
+    @Published var downloadStatus: String = "Idle"
+    @Published var isDownloadingModel: Bool = false
+    let modelDownloader = OllamaModelDownloader()
+
+    // Diagnostics states
+    @Published var isOllamaConnected: Bool? = nil
+    @Published var isGeminiConnected: Bool? = nil
 
     // Context awareness
     @Published var selectedContextText: String = ""
@@ -111,6 +162,15 @@ class MacSynergyViewModel: ObservableObject {
             }
         }
 
+        if let savedBrowser = UserDefaults.standard.string(forKey: "HANDOFF_BROWSER"),
+           let browser = HandoffBrowser(rawValue: savedBrowser) {
+            self._selectedHandoffBrowser = Published(wrappedValue: browser)
+        }
+        if let savedTarget = UserDefaults.standard.string(forKey: "HANDOFF_TARGET"),
+           let target = HandoffTarget(rawValue: savedTarget) {
+            self._selectedHandoffTarget = Published(wrappedValue: target)
+        }
+
         self.chatSessions = EncryptedHistoryManager.loadSessions()
         if let first = self.chatSessions.first {
             self.currentSessionId = first.id
@@ -123,6 +183,33 @@ class MacSynergyViewModel: ObservableObject {
 
         stats.loadFromDisk()
         setupDashboardServer()
+
+        // Bind Speech Recognizer states
+        speechRecognizer.$isRecording
+            .receive(on: RunLoop.main)
+            .assign(to: \.isRecording, on: self)
+            .store(in: &cancellables)
+
+        speechRecognizer.$soundLevel
+            .receive(on: RunLoop.main)
+            .assign(to: \.soundLevel, on: self)
+            .store(in: &cancellables)
+
+        // Bind Downloader states
+        modelDownloader.$progress
+            .receive(on: RunLoop.main)
+            .assign(to: \.downloadProgress, on: self)
+            .store(in: &cancellables)
+
+        modelDownloader.$statusText
+            .receive(on: RunLoop.main)
+            .assign(to: \.downloadStatus, on: self)
+            .store(in: &cancellables)
+
+        modelDownloader.$isDownloading
+            .receive(on: RunLoop.main)
+            .assign(to: \.isDownloadingModel, on: self)
+            .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .didReceiveSelectedText)
             .receive(on: RunLoop.main)
@@ -582,30 +669,112 @@ class MacSynergyViewModel: ObservableObject {
             Act as a senior reasoning model. Synthesize the best parts, correct hallucinations, and give the ultimate answer.
             """
 
-            try await runChromeHandoffAppleScript(prompt: synthesized)
+            try await executeUniversalHandoff(prompt: synthesized)
             self.showUltimateToast = true
             NotificationCenter.default.post(name: Notification.Name("ultimateHandoffDidComplete"), object: nil)
         } catch {
             self.isLoading = false
-            self.errorMessage = "Ultimate Mode Error: \(error.localizedDescription)\n\n(Automation permission? System Settings → Privacy & Security → Automation → enable Google Chrome for MacSynergy.)"
+            self.errorMessage = "Ultimate Mode Error: \(error.localizedDescription)\n\n(Automation permission? System Settings → Privacy & Security → Automation → enable \(selectedHandoffBrowser.rawValue) for MacSynergy.)"
             NotificationCenter.default.post(name: Notification.Name("ultimateHandoffDidComplete"), object: nil)
         }
     }
 
-    private func runChromeHandoffAppleScript(prompt: String) async throws {
+    private func executeUniversalHandoff(prompt: String) async throws {
         let b64 = Data(prompt.utf8).base64EncodedString()
-        let script = """
-        tell application "Google Chrome"
-            activate
-            if (count of windows) is 0 then make new window
-            set t to make new tab at end of tabs of window 1
-            set URL of t to "https://chatgpt.com/"
-            delay 3
-            tell t
-                execute javascript "(function(){const b='\(b64)';const p=new TextDecoder().decode(Uint8Array.from(atob(b),c=>c.charCodeAt(0)));function go(){const el=document.querySelector('#prompt-textarea')||document.querySelector('textarea')||document.querySelector('div[contenteditable=true]');if(!el)return false;el.tagName==='TEXTAREA'?el.value=p:el.innerText=p;el.dispatchEvent(new Event('input',{bubbles:true}));setTimeout(()=>{const b=document.querySelector('[data-testid=send-button]')||document.querySelector('form button');if(b)b.click();},500);return true;}if(!go()){let n=0;const t=setInterval(()=>{n++;if(go()||n>10)clearInterval(t);},500);}})();"
-            end tell
-        end tell
+        let targetURL = selectedHandoffTarget.url
+        
+        let jsPayload = """
+        (function(){
+            const b = '\(b64)';
+            const p = new TextDecoder().decode(Uint8Array.from(atob(b), c => c.charCodeAt(0)));
+            function go() {
+                const el = document.querySelector('#prompt-textarea') || 
+                           document.querySelector('[data-testid="content-editable-textarea"]') || 
+                           document.querySelector('rich-textarea div') || 
+                           document.querySelector('#chat-input') || 
+                           document.querySelector('textarea') || 
+                           document.querySelector('div[contenteditable=true]');
+                if (!el) return false;
+                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                    el.value = p;
+                } else {
+                    el.innerText = p;
+                    el.innerHTML = p;
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                setTimeout(() => {
+                    const b = document.querySelector('[data-testid=send-button]') || 
+                              document.querySelector('[aria-label="Send Message"]') || 
+                              document.querySelector('button[aria-label="Send message"]') || 
+                              document.querySelector('[aria-label="Send prompt"]') || 
+                              document.querySelector('form button') || 
+                              document.querySelector('button');
+                    if (b) {
+                        b.disabled = false;
+                        b.click();
+                    }
+                }, 500);
+                return true;
+            }
+            if (!go()) {
+                let n = 0;
+                const t = setInterval(() => {
+                    n++;
+                    if (go() || n > 15) clearInterval(t);
+                }, 500);
+            }
+        })();
         """
+        
+        // Escape backslashes and double quotes in Javascript for AppleScript string nesting
+        let escapedJS = jsPayload
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+            
+        let script: String
+        switch selectedHandoffBrowser {
+        case .chrome:
+            script = """
+            tell application "Google Chrome"
+                activate
+                if (count of windows) is 0 then make new window
+                set t to make new tab at end of tabs of window 1
+                set URL of t to "\(targetURL)"
+                delay 3
+                tell t
+                    execute javascript "\(escapedJS)"
+                end tell
+            end tell
+            """
+        case .arc:
+            script = """
+            tell application "Arc"
+                activate
+                tell front window
+                    make new tab with properties {URL:"\(targetURL)"}
+                    delay 3
+                    tell active tab
+                        execute javascript "\(escapedJS)"
+                    end tell
+                end tell
+            end tell
+            """
+        case .safari:
+            script = """
+            tell application "Safari"
+                activate
+                if (count of windows) is 0 then make new window
+                tell front window
+                    set current tab to (make new tab with properties {URL:"\(targetURL)"})
+                    delay 3
+                    do JavaScript "\(escapedJS)" in current tab
+                end tell
+            end tell
+            """
+        }
+        
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 var err: NSDictionary?
@@ -622,6 +791,62 @@ class MacSynergyViewModel: ObservableObject {
                     continuation.resume()
                 }
             }
+        }
+    }
+
+    // MARK: - Dictation Toggle
+    @MainActor
+    func toggleDictation() {
+        if speechRecognizer.isRecording {
+            speechRecognizer.stopRecording()
+        } else {
+            Task {
+                let granted = await speechRecognizer.requestPermissions()
+                guard granted else { return }
+                await MainActor.run {
+                    self.speechRecognizer.startRecording { [weak self] transcript in
+                        self?.inputText = transcript
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Ollama Model Downloader
+    func pullOllamaModel(name: String) {
+        modelDownloader.pullModel(name: name) { [weak self] success, msg in
+            if success {
+                self?.saveOllamaModel(name)
+            }
+        }
+    }
+
+    func cancelModelDownload() {
+        modelDownloader.cancel()
+    }
+
+    // MARK: - Connection Diagnostics
+    func testOllamaConnection() async {
+        let connected = await ollamaManager.checkDaemon()
+        await MainActor.run {
+            self.isOllamaConnected = connected
+        }
+    }
+
+    func testGeminiAPIKey() async {
+        guard !apiKey.isEmpty else {
+            await MainActor.run { self.isGeminiConnected = false }
+            return
+        }
+        do {
+            _ = try await hybridService.generateCloudResponse(
+                history: [ChatMessage(role: "user", content: "hi")],
+                apiKey: apiKey,
+                model: geminiModel
+            )
+            await MainActor.run { self.isGeminiConnected = true }
+        } catch {
+            await MainActor.run { self.isGeminiConnected = false }
         }
     }
 

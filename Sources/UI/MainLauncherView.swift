@@ -125,7 +125,16 @@ struct MainLauncherView: View {
             height += 68
         }
         if viewModel.showSettings {
-            height += 115  // 3 rows × ~38px each
+            var settingsHeight: CGFloat = 160
+            if viewModel.selectedHandoffBrowser == .safari {
+                settingsHeight += 16
+            }
+            if viewModel.isDownloadingModel {
+                settingsHeight += 110
+            } else {
+                settingsHeight += 75
+            }
+            height += settingsHeight
         }
         if viewModel.isExpanded {
             height += 120
@@ -239,6 +248,12 @@ struct MainLauncherView: View {
                             viewModel.triggerPasteBack()
                         }
                         .keyboardShortcut(.return, modifiers: .command)
+                        
+                        // 3. Cmd + D: Toggle voice dictation
+                        Button("") {
+                            viewModel.toggleDictation()
+                        }
+                        .keyboardShortcut("d", modifiers: .command)
                     }
                     .opacity(0)
                     .frame(width: 0, height: 0)
@@ -599,7 +614,7 @@ struct SettingsView: View {
     let onHeightChange: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             // Ollama model row
             HStack(spacing: 8) {
                 Image(systemName: "cpu")
@@ -674,6 +689,188 @@ struct SettingsView: View {
                     .cornerRadius(6)
                     .buttonStyle(.plain)
             }
+
+            Divider().background(Color.primary.opacity(0.06))
+
+            // Handoff settings
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Image(systemName: "bolt.shield")
+                        .foregroundColor(.orange)
+                        .font(.system(size: 11))
+                    Text("Handoff Browser:")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Picker("", selection: $viewModel.selectedHandoffBrowser) {
+                        ForEach(HandoffBrowser.allCases) { b in
+                            Text(b.rawValue).tag(b)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+                
+                Spacer()
+                
+                HStack(spacing: 4) {
+                    Image(systemName: "safari")
+                        .foregroundColor(.blue)
+                        .font(.system(size: 11))
+                    Text("Handoff Target:")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Picker("", selection: $viewModel.selectedHandoffTarget) {
+                        ForEach(HandoffTarget.allCases) { t in
+                            Text(t.rawValue).tag(t)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+            }
+
+            if viewModel.selectedHandoffBrowser == .safari {
+                Text("ℹ️ Safari requires 'Develop → Allow JavaScript from Apple Events' enabled.")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider().background(Color.primary.opacity(0.06))
+
+            // Ollama Downloader Section
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Ollama Model Downloader")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Button("Exaone 3.5") { tempOllamaModel = "exaone3.5:7.8b" }
+                            .font(.system(size: 9.5, weight: .medium))
+                            .buttonStyle(.plain)
+                            .foregroundColor(.blue)
+                        Button("Llama 3.2 (3B)") { tempOllamaModel = "llama3.2" }
+                            .font(.system(size: 9.5, weight: .medium))
+                            .buttonStyle(.plain)
+                            .foregroundColor(.blue)
+                        Button("Qwen 2.5 (7B)") { tempOllamaModel = "qwen2.5:7b" }
+                            .font(.system(size: 9.5, weight: .medium))
+                            .buttonStyle(.plain)
+                            .foregroundColor(.blue)
+                    }
+                }
+                
+                HStack(spacing: 8) {
+                    TextField("Enter model name to download...", text: $tempOllamaModel)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11, design: .monospaced))
+                        .padding(6)
+                        .background(Color.primary.opacity(0.04))
+                        .cornerRadius(6)
+                    
+                    if viewModel.isDownloadingModel {
+                        Button("Cancel") {
+                            viewModel.cancelModelDownload()
+                        }
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.red)
+                        .cornerRadius(6)
+                        .buttonStyle(.plain)
+                    } else {
+                        Button("Download") {
+                            viewModel.pullOllamaModel(name: tempOllamaModel)
+                        }
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.blue)
+                        .cornerRadius(6)
+                        .buttonStyle(.plain)
+                        .disabled(tempOllamaModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                
+                if viewModel.isDownloadingModel {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            ProgressView(value: viewModel.downloadProgress)
+                                .progressViewStyle(.linear)
+                            
+                            Text("\(Int(viewModel.downloadProgress * 100))%")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        Text(viewModel.downloadStatus)
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 4)
+                    .transition(.opacity)
+                }
+            }
+
+            Divider().background(Color.primary.opacity(0.06))
+
+            // Diagnostics Section
+            HStack(spacing: 16) {
+                Button(action: {
+                    Task {
+                        await viewModel.testOllamaConnection()
+                        await viewModel.testGeminiAPIKey()
+                        onHeightChange()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "stethoscope")
+                            .font(.system(size: 10))
+                        Text("Run Diagnostics")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.blue)
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                
+                HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        Text("Ollama:")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        if let connected = viewModel.isOllamaConnected {
+                            Image(systemName: connected ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(connected ? .green : .red)
+                                .font(.system(size: 11))
+                        } else {
+                            Text("—").font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    HStack(spacing: 4) {
+                        Text("Gemini API:")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        if let connected = viewModel.isGeminiConnected {
+                            Image(systemName: connected ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(connected ? .green : .red)
+                                .font(.system(size: 11))
+                        } else {
+                            Text("—").font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 4)
         }
         .padding(10)
         .background(Color.primary.opacity(0.02))
@@ -684,6 +881,12 @@ struct SettingsView: View {
         )
         .transition(.move(edge: .top).combined(with: .opacity))
         .onChange(of: viewModel.showSettings) { oldValue, newValue in
+            onHeightChange()
+        }
+        .onChange(of: viewModel.selectedHandoffBrowser) { oldValue, newValue in
+            onHeightChange()
+        }
+        .onChange(of: viewModel.isDownloadingModel) { oldValue, newValue in
             onHeightChange()
         }
     }
@@ -855,6 +1058,27 @@ struct SearchBarRow: View {
                         isTextFieldFocused = true
                     }
                 }
+            
+            // Microphone Dictation Toggle Button
+            Button(action: {
+                viewModel.toggleDictation()
+            }) {
+                ZStack {
+                    if viewModel.isRecording {
+                        Circle()
+                            .stroke(LinearGradient(colors: [Color.purple, Color.blue], startPoint: .top, endPoint: .bottom), lineWidth: 1.5)
+                            .scaleEffect(1.0 + CGFloat(viewModel.soundLevel) * 0.4)
+                            .opacity(0.8 - Double(viewModel.soundLevel) * 0.3)
+                            .animation(.linear(duration: 0.15), value: viewModel.soundLevel)
+                    }
+                    Image(systemName: viewModel.isRecording ? "mic.fill" : "mic")
+                        .foregroundColor(viewModel.isRecording ? .red : .secondary.opacity(0.8))
+                        .font(.system(size: 14, weight: viewModel.isRecording ? .bold : .regular))
+                }
+                .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle voice input (Cmd+D)")
             
             // Clipboard Context Grabber Button
             Button(action: {

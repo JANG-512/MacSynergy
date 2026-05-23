@@ -31,5 +31,10 @@
     <!-- Accessibility: required for global Shift+Space hotkey -->
     <key>NSAppleEventsUsageDescription</key>
     <string>MacSynergy uses Apple Events to automate Chrome for Ultimate Mode handoff.</string>
+    <!-- Speech Dictation: required for voice mode -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>MacSynergy needs microphone permission to record audio for dictation.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>MacSynergy needs speech recognition permission to dictate search queries and commands.</string>
 </dict>
 </plist>
